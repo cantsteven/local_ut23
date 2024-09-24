@@ -1,0 +1,60 @@
+---
+title: "ut23_graphs"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(EnhancedVolcano)
+```
+
+### Reading in the Data 
+
+```{r}
+ut23.object <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23_object.rds")
+```
+
+### Dimplot
+
+```{r}
+DimPlot(ut23.object,
+        pt.size = 1,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 3, 
+        repel = TRUE)
+```
+
+### Dimplot by Experimental Group
+
+```{r fig.height = 5, fig.width = 15}
+DimPlot(ut23.object,
+        pt.size = 1,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 3, 
+        split.by = "sample",
+        repel = TRUE)
+```
+
+**Look at cell numbers by cell type**
+
+```{r fig.height = 5, fig.width = 12}
+# Compute number of cells per celltype
+n_cells <- FetchData(ut23.object, 
+                     vars = c("CellType", "sample")) %>%
+        dplyr::count(CellType, sample)
+
+# Barplot of number of cells per celltype by sample
+ggplot(n_cells, aes(x=CellType, y=n, fill=sample)) +
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
+```
+
+### Subsetting Seurat object with just microglia 
+
+```{r}
+
+```

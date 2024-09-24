@@ -1,0 +1,149 @@
+---
+title: "UT23_snRNAseq"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(patchwork)
+library(hdf5r) #for reading in h5 files 
+library(sctransform) #Dhivya recommends using sctransorm for data transformation 
+library(glmGamPoi) #speeds up SCTransform 
+
+```
+
+**Reading in the Data**
+
+A seurat object was created for each h5 file
+
+```{r, echo=TRUE}
+# Aged M. Vaccae Subjects
+AM1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM1_filtered_feature_bc_matrix.h5")
+AM1_object <- CreateSeuratObject(counts = AM1_counts, project="AM")
+
+AM2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM2_filtered_feature_bc_matrix.h5")
+AM2_object <- CreateSeuratObject(counts = AM2_counts, project="AM")
+
+AM3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM3_filtered_feature_bc_matrix.h5")
+AM3_object <- CreateSeuratObject(counts = AM3_counts, project="AM")
+
+# Aged Vehicle Subjects 
+AV1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV1_filtered_feature_bc_matrix.h5")
+AV1_object <- CreateSeuratObject(counts = AV1_counts, project="AV")
+
+AV2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV2_filtered_feature_bc_matrix.h5")
+AV2_object <- CreateSeuratObject(counts = AV2_counts, project="AV")
+
+AV3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV3_filtered_feature_bc_matrix.h5")
+AV3_object <- CreateSeuratObject(counts = AV3_counts, project="AV")
+
+# Young vehicle subjects
+YV1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV1_filtered_feature_bc_matrix.h5")
+YV1_object <- CreateSeuratObject(counts = YV1_counts, project="YV")
+
+YV2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV2_filtered_feature_bc_matrix.h5")
+YV2_object <- CreateSeuratObject(counts = YV2_counts, project="YV")
+
+YV3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV3_filtered_feature_bc_matrix.h5")
+YV3_object <- CreateSeuratObject(counts = YV3_counts, project="YV")
+
+# Creating merged object 
+ut23.combined<-merge(AM1_object, y=c(AM2_object, AM3_object, AV1_object, AV2_object, AV3_object, YV1_object, YV2_object, YV3_object), add.cell.ids = c("AM1","AM2","AM3","AV1","AV2","AV3","YV1","YV2","YV3"), project = "ut23",  merge.data = TRUE)
+```
+
+**Suerat Pre-Processing**
+
+```{r}
+# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+# This is identifying mitochondrial genes 
+ut23.combined[["percent.mt"]] <- PercentageFeatureSet(ut23.combined, pattern = "^Mt-")
+
+# Visualize QC metrics as a violin plot
+VlnPlot(ut23.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+# nFeature_RNA is the number of unique genes (features) in each cell 
+# nCount_RNA is the number of RNA molecules detected in each cell
+# percent.mt is the percentage of reads that map to mitochondrial genes out of the total reads in each cell 
+
+# Some more plots comparing feature-feature relationships 
+plot1 <- FeatureScatter(ut23.combined, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(ut23.combined, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+# subsetting data 
+ut23.combined <- subset(ut23.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+```
+
+**Data Normalization and Clustering**
+
+Helpful tutorial: https://hbctraining.github.io/scRNA-seq_online/lessons/07_SC_clustering_cells_SCT.html
+
+```{r}
+# run sctransform for normalization 
+ut23.norm <- SCTransform(ut23.combined, vars.to.regress = "percent.mt", verbose = FALSE)
+
+# dimensionality reduction by PCA and UMAP
+# PCA analysis
+ut23.norm2 <- RunPCA(ut23.norm, verbose = FALSE)
+
+# UMAP takes the top principal components and reduces them further to 2 dimensions 
+ut23.norm2 <- RunUMAP(ut23.norm2, dims = 1:30, verbose = FALSE)
+
+# Running t-SNE on the Seurat object using the top principal components (e.g., dims 1:30)
+ut23.norm2 <- RunTSNE(ut23.norm2, dims = 1:30, verbose = FALSE)
+
+# Identifies the nearest neighbors for each cell, creates a NKK graph
+# Here you can change the resolution of the graphs
+ut23.norm2 <- FindNeighbors(ut23.norm2, dims = 1:30, verbose = FALSE)
+
+# Clusters cells based on their expression profiles, looking at different resolutions 
+ut23.norm3 <- FindClusters(ut23.norm2, verbose = FALSE, resolution = c(0.4, 0.6, 0.8, 1.0, 1.4))
+
+saveRDS(ut23.norm3, file = "ut23.norm3.rds")
+
+```
+
+### Data Integration
+
+I noticed that cells were clustering by experimental group, to fix that I did the following:
+
+<https://github.com/hbctraining/scRNA-seq/blob/master/lessons/06_SC_SCT_and_integration.md>
+
+I am using the ut23.norm3 seurat object as the input
+
+```{r}
+# Splitting the object by experimental group 
+split_ut23.norm3 <- SplitObject(ut23.norm3, split.by = "orig.ident")
+
+# Select the most variable features to use for integration
+integ_features <- SelectIntegrationFeatures(object.list = split_ut23.norm3, 
+                                            nfeatures = 3000) 
+
+# Prepare the SCT list object for integration
+split_ut23.norm3 <- PrepSCTIntegration(object.list = split_ut23.norm3, 
+                                   anchor.features = integ_features)
+
+# Find best buddies - can take a while to run
+integ_anchors <- FindIntegrationAnchors(object.list = split_ut23.norm3, 
+                                        normalization.method = "SCT", 
+                                        anchor.features = integ_features)
+
+# Integrate across conditions
+ut23norm.3_int <- IntegrateData(anchorset = integ_anchors, 
+                                   normalization.method = "SCT")
+
+# dim plot with ut23norm.3_int
+clusters_plot <- DimPlot(ut23.norm3, reduction = "umap", label = TRUE, pt.size = 0.1, group.by = 'SCT_snn_res.0.4') + NoLegend()
+
+# The plot grouped by condition
+my_cols = brewer.pal(4, "Dark2")
+
+expgroups_plot <- DimPlot(ut23.norm3, reduction = "umap", pt.size = .1, cols = alpha(my_cols, 0.1), group.by = 'orig.ident') 
+
+clusters_graph <- clusters_plot|expgroups_plot
+
+saveRDS(ut23.norm3, file = "ut23.norm3_int.rds")
+```
