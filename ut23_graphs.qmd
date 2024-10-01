@@ -15,6 +15,7 @@ library(ggprism)
 library(DESeq2)
 library(pheatmap)
 library(EnhancedVolcano)
+library(MAST)
 
 # Weird packages for Pseudobulking 
 library(SingleCellExperiment)
@@ -163,10 +164,44 @@ ggplot(n_cells, aes(x=cluster_id, y=n, fill=group_id)) +
     geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
 ```
 
-### Differential Expression Analysis on Bulk Data 
+### Differential Expression Analysis on Bulk Data
 
 ```{r}
+# pseudobulk the counts based on donor-condition-celltype
+bulk.ut23.all <- AggregateExpression(ut23.object, 
+                                   assays = "RNA", 
+                                  slot = "counts",
+                                   return.seurat = T, 
+                                   group.by = c("group_id", "sample_id"))
 
+# Adding the additional metadata column (this was the easiest way I could think to do this, probably a better way)
+group_ids <- substr(bulk.ut23@meta.data$orig.ident, 1, 2)
+bulk.ut23[["group_id"]] <- group_ids
+
+# This is making a metadata file for the idents: 
+bulk.ut23$celltype.stim <- paste(bulk.ut23$group_id)
+
+# Setting the idents
+Idents(bulk.ut23) <- "group_id"
+
+# Run FindMarkers
+ut23.findmarkers <- FindMarkers(object = bulk.ut23,
+                                assay = "RNA",
+                                slot = 'counts',
+                         ident.1 = "YV",
+                         ident.2 = "AV",
+                         test.use = "DESeq2")
+
+# Volcano Plots 
+EnhancedVolcano(ut23.findmarkers,
+                lab = rownames(ut23.findmarkers),
+                x = "avg_log2FC",
+                y = "p_val_adj",
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                title = "Young Vehicle vs Aged Vehicle")
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/YVvsAV.png", width = 10, height = 10)
 ```
 
 ### Differential Expression Analysis With Pseudobulking
@@ -203,9 +238,17 @@ Idents(bulk.ut23) <- "celltype.stim"
 ut23.findmarkers <- FindMarkers(object = bulk.ut23,
                                 assay = "RNA",
                                 slot = 'counts',
-                         ident.1 = "Microglia_AV",
-                         ident.2 = "Microglia_AM",
+                         ident.1 = "Astrocytes_YV",
+                         ident.2 = "Astrocytes_AV",
                          test.use = "DESeq2")
+
+# Run FindMarkers
+ut23.findmarkers <- FindMarkers(object = bulk.ut23,
+                                assay = "RNA",
+                                slot = 'data',
+                         ident.1 = "Astrocytes_YV",
+                         ident.2 = "Astrocytes_AV",
+                         test.use = "MAST")
 
 # Volcano Plots 
 EnhancedVolcano(ut23.findmarkers,
@@ -214,9 +257,12 @@ EnhancedVolcano(ut23.findmarkers,
                 y = "p_val_adj",
                 FCcutoff = 0.25,
                 pCutoff = 0.05,
-                title = "Oligodendrocytes; Aged M Vaccae vs Young")
+                title = "Astrocytes: Young Vehicle vs Aged Vehicle")
 
-ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/oligo.amyv.png", width = 10, height = 10)
+# "Astrocytes: Young Vehicle vs Aged Vehicle"
+# "Astrocytes: Aged M Vaccae vs Aged Vehicle"
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/astro_YVvsAV.png", width = 10, height = 10)
 ```
 
 ### Pseudobulking
@@ -473,7 +519,11 @@ sig_res <- dplyr::filter(res_tbl, padj < padj_cutoff) %>%
 sig_res
 ```
 
-\
+### Clustering the Microglia Cluster 
+
+```{r}
+
+```
 
 \
 
