@@ -10,46 +10,64 @@ library(Seurat)
 library(patchwork)
 library(hdf5r) #for reading in h5 files 
 library(sctransform) #Dhivya recommends using sctransorm for data transformation 
+library(reticulate)
+library(glmGamPoi) # For SCTransform, this is incompatible with R Version 4.4 so I had to manually install a version for 4.3 
+library(harmony)
+library(SoupX)
 
 ```
 
-**Reading in the Data**
+### **Reading in the data and correcting for ambient RNA using SoupX**
 
-A seurat object was created for each h5 file
+<https://cran.r-project.org/web/packages/SoupX/vignettes/pbmcTutorial.html>
 
 ```{r, echo=TRUE}
 # Aged M. Vaccae Subjects
 AM1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM1_filtered_feature_bc_matrix.h5")
-AM1_object <- CreateSeuratObject(counts = AM1_counts, min.features = 100, project="AM")
+AM1_object <- CreateSeuratObject(counts = AM1_counts, project="AM")
 
 AM2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM2_filtered_feature_bc_matrix.h5")
-AM2_object <- CreateSeuratObject(counts = AM2_counts, min.features = 100, project="AM")
+AM2_object <- CreateSeuratObject(counts = AM2_counts, project="AM")
 
 AM3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AM3_filtered_feature_bc_matrix.h5")
-AM3_object <- CreateSeuratObject(counts = AM3_counts, min.features = 100, project="AM")
+AM3_object <- CreateSeuratObject(counts = AM3_counts, project="AM")
 
 # Aged Vehicle Subjects 
 AV1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV1_filtered_feature_bc_matrix.h5")
-AV1_object <- CreateSeuratObject(counts = AV1_counts, min.features = 100, project="AV")
+AV1_object <- CreateSeuratObject(counts = AV1_counts, project="AV")
 
 AV2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV2_filtered_feature_bc_matrix.h5")
-AV2_object <- CreateSeuratObject(counts = AV2_counts, min.features = 100, project="AV")
+AV2_object <- CreateSeuratObject(counts = AV2_counts, project="AV")
 
 AV3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/AV3_filtered_feature_bc_matrix.h5")
-AV3_object <- CreateSeuratObject(counts = AV3_counts, min.features = 100, project="AV")
+AV3_object <- CreateSeuratObject(counts = AV3_counts, project="AV")
 
 # Young vehicle subjects
 YV1_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV1_filtered_feature_bc_matrix.h5")
-YV1_object <- CreateSeuratObject(counts = YV1_counts, min.features = 100, project="YV")
+YV1_object <- CreateSeuratObject(counts = YV1_counts, project="YV")
 
 YV2_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV2_filtered_feature_bc_matrix.h5")
-YV2_object <- CreateSeuratObject(counts = YV2_counts, min.features = 100, project="YV")
+YV2_object <- CreateSeuratObject(counts = YV2_counts, project="YV")
 
 YV3_counts <- Read10X_h5("/stor/work/Fonken/UT23_snRNAseq/YV3_filtered_feature_bc_matrix.h5")
-YV3_object <- CreateSeuratObject(counts = YV3_counts, min.features = 100, project="YV")
+YV3_object <- CreateSeuratObject(counts = YV3_counts, project="YV")
 
 # Creating merged object 
 ut23.combined<-merge(AM1_object, y=c(AM2_object, AM3_object, AV1_object, AV2_object, AV3_object, YV1_object, YV2_object, YV3_object), add.cell.ids = c("AM1","AM2","AM3","AV1","AV2","AV3","YV1","YV2","YV3"), project = "ut23",  merge.data = TRUE)
+
+
+# Extracting the sample info from the cell_ids and adding it to the metadata 
+# Extract cell names
+cell_ids <- Cells(ut23.combined)
+
+# Create a sample metadata column based on the prefixes
+sample_info <- sapply(strsplit(cell_ids, "_"), `[`, 1)
+
+# Add this as a new metadata column
+ut23.combined$sample <- sample_info
+
+# Verify the metadata
+head(ut23.combined@meta.data)
 ```
 
 **Seurat Quality Control**
@@ -68,7 +86,7 @@ ut23.combined$mitoRatio <- ut23.combined@meta.data$mitoRatio / 100
 metadata <- ut23.combined@meta.data
 
 metadata <- metadata %>%
-        dplyr::rename(sample = orig.ident,
+        dplyr::rename(group = orig.ident,
                       nUMI = nCount_RNA,
                       nGene = nFeature_RNA)
 
@@ -87,14 +105,15 @@ saveRDS(ut23.combined, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.c
   	theme_classic() +
   	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
   	theme(plot.title = element_text(hjust=0.5, face="bold")) +
-  	ggtitle("NCells")
+  	ggtitle("Number of cells per sample")
   	
 # Visualize the number UMIs/transcripts per cell
   	ggplot(data = metadata, aes(color=sample, x=nUMI, fill= sample)) + 
   	geom_density(alpha = 0.2) + 
   	scale_x_log10() + 
   	theme_classic() +
-  	ylab("Cell density") +
+  	scale_x_log10(labels = scales::comma) + 
+  	ylab("Number of UMIs per cell") +
   	geom_vline(xintercept = 500)
   	
 # Visualize the distribution of genes detected per cell via histogram
@@ -102,7 +121,8 @@ saveRDS(ut23.combined, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.c
   	geom_density(alpha = 0.2) + 
   	theme_classic() +
   	scale_x_log10() + 
-  	geom_vline(xintercept = 300)
+  	geom_vline(xintercept = 250) + 
+  	geom_vline(xintercept = 2500)
   	
     #Here we see a bimodal distribution, maybe indicating the presence of different cell types 
 
@@ -112,7 +132,7 @@ saveRDS(ut23.combined, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.c
   	theme_classic() +
   	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
   	theme(plot.title = element_text(hjust=0.5, face="bold")) +
-  	ggtitle("NCells vs NGenes")
+  	ggtitle("NCells vs NGenes (Distribution of genes detected per cell)")
   	
 # Visualize the correlation between genes detected and number of UMIs and determine whether strong presence of cells with low numbers of genes/UMIs
   	ggplot(data = metadata, aes(x=nUMI, y=nGene, color=mitoRatio)) + 
@@ -148,9 +168,11 @@ saveRDS(ut23.combined, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.c
 
 Now that we have visualized the various metrics, we can decide on the thresholds to apply which will result in the removal of low quality cells. Often the recommendations mentioned earlier are a rough guideline, and the specific experiment needs to inform the exact thresholds chosen. We will use the following thresholds:
 
--   nUMI \> 500
+-   nUMI \> 500 (transcripts per cell)
 
--   nGene \> 250
+-   nGene \> 250 &
+
+-   nGene \> 2500
 
 -   log10GenesPerUMI \> 0.8
 
@@ -158,156 +180,168 @@ Now that we have visualized the various metrics, we can decide on the thresholds
 
 ```{r}
 # Optional: Read in the merged_filtered_seurat.RData file 
-ut23.combined <- readRDS("/Volumes/Fonken/UT23_snRNAseq/local_ut23/ut23.combined.Rds")
+#ut23.combined <- readRDS("/Volumes/Fonken/UT23_snRNAseq/local_ut23/ut23.combined.Rds")
 
 #other file for when using the comp server 
-ut23.combined <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.combined.Rds")
+#ut23.combined <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.combined.Rds")
 
 # Filter out low quality reads using selected thresholds - these will change with experiment
 ut23.filtered <- subset(x = ut23.combined, 
                          subset= (nUMI >= 500) & 
                            (nGene >= 250) & 
+                           #(nGene <= 2500) & 
                            (log10GenesPerUMI > 0.80) & 
                            (mitoRatio < 0.20))
 
-# Gene level filtering
+# Create new metadata dataframe
+metadata2 <- ut23.filtered@meta.data
 
-# Extract counts
-counts <- GetAssayData(object = ut23.filtered, slot = "counts")
+# Visualize the number of cell counts per sample
+ggplot(data = metadata2, aes(x=sample, fill=sample)) + 
+  	geom_bar() +
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  	ggtitle("NCells")
+  	
+# Visualize the number UMIs/transcripts per cell
+ggplot(data = metadata2, aes(color=sample, x=nUMI, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	scale_x_log10(labels = scales::comma) + 
+  	ylab("Cell density") +
+  	geom_vline(xintercept = 500)
+  	
+# Visualize the distribution of genes detected per cell via histogram
+ggplot(data = metadata2, aes(color=sample, x=nGene, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	theme_classic() +
+  	scale_x_log10() + 
+  	geom_vline(xintercept = 300)
+  	
+    #Here we see a bimodal distribution, maybe indicating the presence of different cell types 
 
-# Output a logical matrix specifying for each gene on whether or not there are more than zero counts per cell
-nonzero <- counts > 0
-
-# Sums all TRUE values and returns TRUE if more than 10 TRUE values per gene
-keep_genes <- Matrix::rowSums(nonzero) >= 10
-
-# Only keeping those genes expressed in more than 10 cells
-filtered_counts <- counts[keep_genes, ]
-
-# Reassign to filtered Seurat object
-ut23.filtered <- CreateSeuratObject(filtered_counts, meta.data = ut23.filtered@meta.data)
-
+# Visualize the distribution of genes detected per cell via boxplot
+ggplot(data = metadata2, aes(x=sample, y=log10(nGene), fill=sample)) + 
+  	geom_boxplot() + 
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  	ggtitle("NCells vs NGenes")
+  	
+# Visualize the correlation between genes detected and number of UMIs and determine whether strong presence of cells with low numbers of genes/UMIs
+  	ggplot(data = metadata2, aes(x=nUMI, y=nGene, color=mitoRatio)) + 
+  	geom_point() + 
+	scale_colour_gradient(low = "gray90", high = "black") +
+  	stat_smooth(method=lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) +
+  	geom_hline(yintercept = 250) +
+  	facet_wrap(~sample)
+  	
+# Visualize the distribution of mitochondrial gene expression detected per cell
+  	ggplot(data = metadata2, aes(color=sample, x=mitoRatio, fill=sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 0.2)
+  	
+  	#We define poor quality samples for mitochondrial counts as cells which surpass the 0.2 mitochondrial ratio mark
+  	
+# Visualize the overall complexity of the gene expression by visualizing the genes detected per UMI
+  	ggplot(data = metadata2, aes(x=log10GenesPerUMI, color = sample, fill=sample)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	geom_vline(xintercept = 0.8)
+  	
 saveRDS(ut23.filtered, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.filtered.Rds")
+
 ```
 
-**Data Normalization and Clustering**
+### Normalization and Integration with SCTransform and Harmony
 
-[hbctraining](https://github.com/hbctraining/scRNA-seq_online/blob/master/lessons/06_SC_SCT_normalization.md)
-
-```{r}
-ut23.filtered <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.filtered.Rds")
-
-# Split seurat object by condition to perform cell cycle scoring and SCT on all samples
-split_seurat <- SplitObject(ut23.filtered, split.by = "sample")
-
-options(future.globals.maxSize = 4000 * 1024^2)
-
-for (i in 1:length(split_seurat)) {
-    split_seurat[[i]] <- SCTransform(split_seurat[[i]], vars.to.regress = c("mitoRatio"), vst.flavor = "v2")
-}
-
-# Check which assays are stored in objects
-split_seurat$AM@assays
-
-# Save the split seurat object
-saveRDS(split_seurat, "/stor/work/Fonken/UT23_snRNAseq/local_ut23/split_seurat.Rds")
-```
-
-**Running CCA**
+Following this [https://github.com/satijalab/seurat/issues/4896https://github.com/satijalab/seurat/issues/4896](https://github.com/satijalab/seurat/issues/4896)
 
 ```{r}
-# Select the most variable features to use for integration
-integ_features <- SelectIntegrationFeatures(object.list = split_seurat, 
-                                            nfeatures = 3000) 
+# Read in the filtered object 
+ut23.harmony <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.filtered.Rds")
 
-# Prepare the SCT list object for integration
-split_seurat <- PrepSCTIntegration(object.list = split_seurat, 
-                                   anchor.features = integ_features)
+# Filtering for Ttr, a gene highly expressed in the choroid plexus (two samples appear to have choroid plexus contamination)
+# Identify Ttr-positive cells
+# ttr_positive <- WhichCells(object = ut23.harmony, expression = Ttr > 1)
 
-# Find best buddies - can take a while to run
-integ_anchors <- FindIntegrationAnchors(object.list = split_seurat, 
-                                        normalization.method = "SCT", 
-                                        anchor.features = integ_features)
+# Subset the object to remove these cells
+#ut23.harmony <- subset(ut23.harmony, cells = setdiff(Cells(ut23.harmony), ttr_positive))
 
-# Integrate across conditions
-seurat_integrated <- IntegrateData(anchorset = integ_anchors, 
-                                   normalization.method = "SCT")
+# Adding a batch column 
+# Extract the "sample" column from the metadata
+samples <- ut23.harmony@meta.data$sample
+ut23.harmony@meta.data$batch <- substr(samples, 3, 3)
 
-# Save integrated seurat object
-saveRDS(seurat_integrated, "/stor/work/Fonken/UT23_snRNAseq/local_ut23/integrated_seurat.rds")
+# Running SCTransform 
+ut23.harmony.list <- SplitObject(ut23.harmony, split.by="sample")
+ut23.harmony.list <- lapply(X = ut23.harmony.list, 
+                       FUN = SCTransform, 
+                       method = "glmGamPoi", 
+                       return.only.var.genes = FALSE)
+var.features <- SelectIntegrationFeatures(object.list = ut23.harmony.list, nfeatures = 3000)
 
-# Read in integrated seurat object
-ut23.integrated <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/integrated_seurat.rds")
-```
+ut23.harmony.sct <- merge(x = ut23.harmony.list[[1]], y = ut23.harmony.list[2:length(ut23.harmony.list)], merge.data=TRUE)
+VariableFeatures(ut23.harmony.sct) <- var.features
+ut23.harmony.sct <- RunPCA(ut23.harmony.sct, verbose = FALSE)
 
-### PCA and UMAP of integrated object
+# Using batch as covariates 
+ut23.harmony.sct <- RunHarmony(ut23.harmony.sct, assay.use="SCT", group.by.vars = "batch")
+ut23.harmony.sct <- RunUMAP(ut23.harmony.sct, reduction = "harmony", dims = 1:30)
+ut23.harmony.sct <- FindNeighbors(ut23.harmony.sct, reduction = "harmony", dims = 1:30) 
 
-```{r}
-# Run PCA
-ut23.integrated <- RunPCA(object = ut23.integrated)
-
-# Plot PCA
-PCAPlot(ut23.integrated,
-        pt.size = 1,
-        split.by = "sample")  
-
-# Set seed
-set.seed(123456)
-
-# Run UMAP
-ut23.integrated <- RunUMAP(ut23.integrated, 
-                             dims = 1:40,, 
-			     reduction = "pca")
-
-# Plot UMAP                             
-DimPlot(ut23.integrated, pt.size = 1)   
-
-# Plot UMAP split by sample
-DimPlot(ut23.integrated,
-        pt.size = 1,
-        split.by = "sample")  
-```
-
-### Data Clustering
-
-```{r}
-# Determine the K-nearest neighbor graph
-ut23.integrated <- FindNeighbors(object = ut23.integrated, 
-                                dims = 1:40)
-
-# Determine the clusters for various resolutions                                
-ut23.integrated <- FindClusters(object = ut23.integrated,
+# Finding clusters 
+ut23.harmony.sct <- FindClusters(object = ut23.harmony.sct,
                                resolution = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.4))
 
 # Assign identity of clusters
-Idents(object = ut23.integrated) <- "integrated_snn_res.0.2"
+Idents(object = ut23.harmony.sct) <- "SCT_snn_res.0.2"
 
-# Plot the UMAP
-DimPlot(ut23.integrated,
-        pt.size = 1,
-        reduction = "umap",
-        label = TRUE,
-        label.size = 6)
+# Save integrated seurat object
+saveRDS(ut23.harmony.sct, "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.harmony.sct.rds")
+
+# Read integrated seurat object
+ut23.harmony.sct <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23.harmony.sct.rds")
+
+#Dim plot 
+DimPlot(ut23.harmony.sct,
+        pt.size = 1
+       ) 
+
+
+# Reassigning 
+ut23.integrated <- ut23.harmony.sct
 ```
 
 ### Clustering Quality Control
 
 ```{r}
-# Extract identity and sample information from seurat object to determine the number of cells per cluster per sample
-n_cells <- FetchData(ut23.integrated, 
-                     vars = c("ident", "sample")) %>%
-        dplyr::count(ident, sample)
+# Reassigning idents 
+Idents(object = ut23.integrated) <- "SCT_snn_res.0.2"
 
-# Barplot of number of cells per cluster by sample
-ggplot(n_cells, aes(x=ident, y=n, fill=sample)) +
+# Extract identity and sample information from seurat object to determine the number of cells per cluster per group
+n_cells <- FetchData(ut23.integrated, 
+                     vars = c("ident", "group")) %>%
+        dplyr::count(ident, group)
+
+# Barplot of number of cells per cluster by group
+ggplot(n_cells, aes(x=ident, y=n, fill=group)) +
     geom_bar(position=position_dodge(), stat="identity") +
     geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
 
-# UMAP of cells in each cluster by sample
+# UMAP of cells in each cluster by group
 DimPlot(ut23.integrated, 
         label = TRUE, 
         pt.size = 1,
-        split.by = "sample")  + NoLegend()
+        split.by = "group")  + NoLegend()
 
 metrics <-  c("nUMI", "nGene", "S.Score", "G2M.Score", "mitoRatio")
 
@@ -319,10 +353,22 @@ FeaturePlot(ut23.integrated,
             min.cutoff = 'q10',
             label = TRUE)
 
-# Boxplot of nGene per cluster
-ggplot(ut23.integrated@meta.data) +
-    geom_boxplot(aes(x=integrated_snn_res.0.4, y=nGene, fill=integrated_snn_res.0.4)) +
-    NoLegend()
+#Compute number of cells per celltype------
+n_cells <- FetchData(ut23.integrated, 
+                     vars = c("sample")) %>%
+        dplyr::count(sample)
+
+# Barplot of number of cells per celltype by group
+cellcounts_graph <- ggplot(n_cells, aes(x=sample, y = n)) +
+   geom_bar(stat = "identity", width = 0.5) + 
+   theme_prism(base_size = 10) +
+   xlab("Group") +
+   ylab("Number of Cells") +
+   theme(legend.position = "none")
+
+cellcounts_graph
+
+
 ```
 
 ### Looking at Clusters
@@ -333,6 +379,9 @@ DefaultAssay(ut23.integrated) <- "RNA"
 
 # Normalize RNA data for visualization purposes
 ut23.integrated <- NormalizeData(ut23.integrated, verbose = FALSE)
+
+# Reordering the idens in case they got out of order 
+Idents(ut23.integrated) <- factor(x = Idents(ut23.integrated), levels = sort(levels(ut23.integrated)))
 ```
 
 ```{r}
@@ -367,6 +416,7 @@ FeaturePlot(ut23.integrated,
             min.cutoff = 'q10', 
             pt.size = 1,
             label = TRUE)
+
 ```
 
 ### Oligodendrocytes
@@ -417,6 +467,34 @@ FeaturePlot(ut23.integrated,
             label = TRUE)
 ```
 
+### Ttr genes
+
+```{r fig.height = 3, fig.width = 50}
+FeaturePlot(ut23.integrated, 
+            reduction = "umap", 
+            features = c("Ttr"), 
+            order = TRUE,
+            min.cutoff = 'q10', 
+            split.by = "sample",
+            pt.size = 2,
+            label = TRUE)
+
+DotPlot(ut23.integrated, "Ttr", assay="RNA")
+```
+
+```{r fig.height = 3, fig.width = 20}
+#cell counts in microglia subcluster
+n_cells <- FetchData(ut23.integrated, 
+                     vars = c("SCT_snn_res.0.2", "sample")) %>%
+        dplyr::count(SCT_snn_res.0.2, sample)
+
+
+# Barplot of number of cells per celltype by sample
+ggplot(n_cells, aes(x=SCT_snn_res.0.2, y=n, fill=sample)) +
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
+```
+
 ### Endothelial cells
 
 ```{r}
@@ -461,25 +539,10 @@ markers[["GABA Neur"]] <- c("Gad1", "Gad2")
 markers[["Endothelial"]] <- c("Pecam1", "Vwf")
 markers[["Oligo"]] <- c("Mog", "Mbp", "Plp1")
 markers[["Oligo Pre"]] <- c("Pdgfra", "Cspg4")
+markers[["Stem"]] <- c("Dcx", "Nestin")
 
 # Create dotplot based on RNA expression
 DotPlot(ut23.integrated, markers, assay="RNA")
-```
-
-```{r}
-
-```
-
-**Comparing Cluster 21 and 9**
-
-Cluster 21 does express immune markers, but also expresses oligodendrocyte markers. I think that these are oligodendrocytes displaying some immune like responses.
-
-```{r fig.height = 5, fig.width = 10}
-microgliamarkers <- list()
-microgliamarkers[["Microglia"]] <- c("Cx3cr1", "Ptprc", "P2ry12", "Tgfbr1", "Mbp", "Mog")
-
-# Create dotplot based on RNA expression
-DotPlot(ut23.integrated, microgliamarkers, assay="RNA")
 ```
 
 ### Renaming Idents
@@ -489,50 +552,70 @@ DotPlot(ut23.integrated, microgliamarkers, assay="RNA")
 ut23.integrated <- RenameIdents(object = ut23.integrated, 
                                "0" = "Oligodendrocytes",
                                "1" = "Excitatory Neurons",
-                               "2" = "Excitatory Neurons",
+                               "2" = "Oligodendrocytes",
                                "3" = "Excitatory Neurons",
-                               "4" = "Excitatory Neurons",
+                               "4" = "Oligodendrocyte Precursors",
                                "5" = "Inhibitory Neurons",
                                "6" = "Excitatory Neurons",
-                               "7" = "Oligodendrocyte Precursors",
-                               "8" = "Inhibitory Neurons",
+                               "7" = "Excitatory Neurons",
+                               "8" = "Excitatory Neurons",
                                "9" = "Microglia",
                                "10" = "Excitatory Neurons",
-                               "11" = "Inhibitory Neurons",
-                               "12" = "Excitatory Neurons",
-                               "13" = "Excitatory Neurons",
+                               "11" = "Excitatory Neurons",
+                               "12" = "Inhibitory Neurons",
+                               "13" = "Inhibitory Neurons",
                                "14" = "Excitatory Neurons",
-                               "15" = "Astrocytes",
-                               "16" = "Excitatory Neurons",
+                               "15" = "Excitatory Neurons",
+                               "16" = "Astrocytes",
                                "17" = "Excitatory Neurons",
                                "18" = "Inhibitory Neurons",
                                "19" = "Excitatory Neurons",
-                               "20" = "Excitatory Neurons",
-                               "21" = "Oligodendrocytes",
-                               "22" = "Oligodendrocytes",
-                               "23" = "Excitatory Neurons",
-                               "24" = "Endothelial Cells",
-                               "25" = "Excitatory Neurons",
-			                         "26" = "Excitatory Neurons")
+                               "20" = "Oligodendrocytes",
+                               "21" = "Excitatory Neurons"
+                               )
 
 #Set the cell type in the metadata 
-ut23.integrated$CellType <- Idents(ut23.integrated)
+ut23.integrated$cluster_id <- Idents(ut23.integrated)
 ```
 
 ### Labeled Cluster UMAP Plot
 
 ```{r}
 DimPlot(ut23.integrated,
-        pt.size = 1,
+        pt.size = 0.5,
         reduction = "umap",
         label = TRUE,
         label.size = 3, 
         repel = TRUE)
 ```
 
-### Save seurat object 
+### Save seurat object
 
 ```{r}
 saveRDS(ut23.integrated, "/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23_object.rds")
 
+```
+
+Removing Ttr positive cells:
+
+```{r}
+# Identify Ttr-positive cells
+ttr_positive <- WhichCells(object = ut23.object, expression = Ttr > 1)
+
+# Subset your object to remove these cells
+ut23.object.ttrremoved <- subset(ut23.object, cells = setdiff(Cells(ut23.object), ttr_positive))
+
+```
+
+```{r}
+choroid_genes <- c("Ttr", "Folr1", "Prlr", "Aqp1", "Zo1", "Icam1")
+
+# Calculate average expression per sample for the choroid plexus genes
+AverageExpression(ut23.object.ttrremoved, features = choroid_genes, group.by = "sample_id")
+
+VlnPlot(ut23.object.ttrremoved, features = choroid_genes, group.by = "sample_id", pt.size = 0.1, combine = TRUE)
+
+# Create DotPlot with enough colors
+
+DotPlot(ut23.object.ttrremoved, "Ttr", assay="RNA")
 ```

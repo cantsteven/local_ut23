@@ -6,16 +6,17 @@ editor: visual
 
 ```{r}
 library(tidyverse)
+library(patchwork) #You need version 1.3.0 install_github("thomasp85/patchwork@v1.3.0")
 library(SeuratObject)
 library(Seurat)
 library(EnhancedVolcano)
-# library(patchwork)
 library(ggthemes)
 library(ggprism)
 library(DESeq2)
 library(pheatmap)
 library(EnhancedVolcano)
-library(MAST)
+library(DEsingle) # From bioconductor 
+library(MAST) #From bioconductor
 
 # Weird packages for Pseudobulking 
 library(SingleCellExperiment)
@@ -35,9 +36,8 @@ ut23.object <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/ut23_object.r
 ut23.object <- NormalizeData(ut23.object, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
 
 #Rename some things in the metadata to make my life easier when pseudobulking 
-colnames(ut23.object@meta.data)[colnames(ut23.object@meta.data) == "orig.ident"] <- "sample_id"
-colnames(ut23.object@meta.data)[colnames(ut23.object@meta.data) == "sample"] <- "group_id"
-colnames(ut23.object@meta.data)[colnames(ut23.object@meta.data) == "CellType"] <- "cluster_id"
+colnames(ut23.object@meta.data)[colnames(ut23.object@meta.data) == "sample"] <- "sample_id"
+colnames(ut23.object@meta.data)[colnames(ut23.object@meta.data) == "group"] <- "group_id"
 ```
 
 ### Dimplots
@@ -61,7 +61,7 @@ sample_dimplot <- DimPlot(ut23.object,
         reduction = "umap",
         label = FALSE,
         label.size = 3, 
-        group.by = "sample",
+        group.by = "group_id",
         repel = TRUE) +
   ggtitle("Experimental Group") + 
   theme_prism(base_size = 10)
@@ -70,7 +70,7 @@ sample_dimplot <- DimPlot(ut23.object,
 # Cell Type Expression 
 markers <- list()
 markers[["Microglia"]] <- c("Cx3cr1", "Csf1r", "P2ry12")
-markers[["Astrocytes"]] <- c("Gfap")
+markers[["Astrocytes"]] <- c("Aqp4")
 markers[["Neurons"]] <- c("Rbfox3")
 markers[["Glut. Neurons"]] <- c("Slc17a7")
 markers[["GABA Neurons"]] <- c("Gad1")
@@ -100,11 +100,11 @@ ut23_dimplots + plot_annotation(tag_levels = 'A') & theme(plot.tag = element_tex
 
 ```{r fig.height = 5, fig.width = 15}
 DimPlot(ut23.object,
-        pt.size = 1,
+        pt.size = 2,
         reduction = "umap",
         label = TRUE,
         label.size = 3, 
-        split.by = "sample",
+        split.by = "group_id",
         repel = TRUE)
 ```
 
@@ -150,16 +150,26 @@ Endothelial cells:
 
 -   Pecam1: A cell adhesion molecule expressed in endothelial cells
 
-**Look at cell numbers by cell type**
+### **Look at cell numbers by cell type**
 
 ```{r fig.height = 5, fig.width = 12}
 # Compute number of cells per celltype
 n_cells <- FetchData(ut23.object, 
-                     vars = c("cluster_id", "group_id")) %>%
-        dplyr::count(cluster_id, group_id)
+                     vars = c("cluster_id", "group_id", "sample_id")) %>%
+        dplyr::count(cluster_id, group_id, sample_id)
+
+# Barplot of number of cells per celltype by group
+ggplot(n_cells, aes(x=cluster_id, y=n, fill=group_id)) +
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
 
 # Barplot of number of cells per celltype by sample
-ggplot(n_cells, aes(x=cluster_id, y=n, fill=group_id)) +
+ggplot(n_cells, aes(x=cluster_id, y=n, fill=sample_id)) +
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
+
+# Barplot of number of cells per celltype by sample
+ggplot(n_cells, aes(x=cluster_id, y=n, fill=sample_id)) +
     geom_bar(position=position_dodge(), stat="identity") +
     geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
 ```
@@ -265,12 +275,72 @@ EnhancedVolcano(ut23.findmarkers,
 ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/astro_YVvsAV.png", width = 10, height = 10)
 ```
 
-### Pseudobulking
+### Trying out MAST
+
+<https://miaozhun.github.io/DEsingle/>
+
+No need for pseudobulking, trying to use findmarkers() first
+
+```{r}
+# Subsetting microglia cluster 
+microglia_subcluster <- subset(ut23.object, idents = "Microglia")
+
+# Setting default assay to RNA 
+DefaultAssay(microglia_subcluster) <- "RNA"
+
+# Set the identity class to the group metadata
+Idents(microglia_subcluster) <- microglia_subcluster$group_id
+
+# Run FindMarkers using MAST to compare AV vs YV
+microglia_mast_yvav <- FindMarkers(microglia_subcluster, 
+                            ident.1 = "YV", 
+                            ident.2 = "AV", 
+                            test.use = "MAST")
+
+# Run FindMarkers using MAST to compare AV vs YV
+microglia_mast_amav <- FindMarkers(microglia_subcluster, 
+                            ident.1 = "AM", 
+                            ident.2 = "AV", 
+                            test.use = "MAST")
+
+# Volcano Plots 
+EnhancedVolcano(microglia_mast_yvav,
+                lab = rownames(microglia_mast_yvav),
+                x = "avg_log2FC",
+                y = "p_val_adj",
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                title = "Young Vehicle vs Aged Vehicle")
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/astro_YVvsAV.png", width = 10, height = 10)
+
+# Volcano Plots 
+EnhancedVolcano(microglia_mast_amav,
+                lab = rownames(microglia_mast_amav),
+                x = "avg_log2FC",
+                y = "p_val_adj",
+                FCcutoff = 0.25,
+                pCutoff = 0.05,
+                title = "Aged M Vaccae vs Aged Vehicle")
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/astro_AVvsAM.png", width = 10, height = 10)
+
+#creating deg lists
+genes_microglia_mast_yvav <- rownames(microglia_mast_yvav[microglia_mast_yvav$p_val_adj < 0.05, ])
+
+write.table(genes_microglia_mast_yvav, file = "significant_genes.txt", quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+
+
+```
+
+### Pseudobulking (1 of 2)
 
 Was trying this one: <https://github.com/hbctraining/scRNA-seq_online/blob/master/lessons/09_merged_SC_marker_identification.md>
 
-```{r fig.height = 10, fig.width = 10}
+# I need to add batch here
 
+```{r fig.height = 10, fig.width = 10}
 
 # Extract raw counts and metadata to create SingleCellExperiment object
 counts <- ut23.object@assays$RNA@counts
@@ -281,8 +351,6 @@ metadata$cluster_id <- factor(ut23.object@active.ident)
 
 sce <- SingleCellExperiment(assays = list(counts = counts), 
                            colData = metadata)
-
-
 
 # Extract unique names of clusters (= levels of cluster_id factor variable), I have 7 clusters 
 cluster_names <- levels(colData(sce)$cluster_id)
@@ -428,7 +496,7 @@ for (i in 1:length(counts_ls)) {
 str(metadata_ls)
 ```
 
-**DESeq2 on Pseudobulked data**
+**DESeq2 on Pseudobulked data (2 of 2)**
 
 ```{r}
 # Double-check that both lists have same names
@@ -446,10 +514,13 @@ head(cluster_metadata)
 # Check matching of matrix columns and metadata rows
 all(colnames(cluster_counts) == rownames(cluster_metadata))
 
+# Setting the reference level as AV
+cluster_metadata$group_id <- factor(cluster_metadata$group_id, levels = c("AV", "YV", "AM"))
+
 # Create DESeq2 object        
 dds <- DESeqDataSetFromMatrix(cluster_counts, 
                               colData = cluster_metadata, 
-                              design = ~ group_id)
+                              design = ~ batch + group_id)
 
 # Transform counts for data visualization
 rld <- rlog(dds, blind=TRUE)
@@ -489,12 +560,12 @@ resultsNames(dds)
 
 # Generate results object
 res <- results(dds, 
-               name = "group_idAV",
+               name = "group_idAM",
                alpha = 0.05)
 
 # Shrink the log2 fold changes to be more appropriate using the apeglm method - should cite [paper]() when using this method
 res <- lfcShrink(dds, 
-                 coef = "group_idAV",
+                 coef = "group_idYV",
                  res=res,
                  type = "apeglm")
 
@@ -519,12 +590,97 @@ sig_res <- dplyr::filter(res_tbl, padj < padj_cutoff) %>%
 sig_res
 ```
 
-### Clustering the Microglia Cluster 
+### Clustering the Microglia Cluster
+
+There is a function canned FindSubCluster but I don't think it actually reclusters the data, there aren't a lot of resources online about how to do this but I'm roughly following this:\
+<https://github.com/satijalab/seurat/issues/4320>\
+\
+There seem to be several ways to do it and I'm basically just totally re-doing the clustering with the subsetted object.
 
 ```{r}
+# Subsetting one cluster
+microglia_subcluster <- subset(ut23.object, idents = "Microglia")
+
+# Changing the default assay from SCT to RNA
+DefaultAssay(microglia_subcluster) <- "RNA"
+
+#  Going through the guided-clustering tutorial's workflow
+
+# Run Split Object
+split_microglia_subcluster <- SplitObject(microglia_subcluster, split.by = "group_id")
+ 
+# SCTransform for each sample 
+for (i in 1:length(split_microglia_subcluster)) {
+    split_microglia_subcluster[[i]] <- SCTransform(split_microglia_subcluster[[i]], vst.flavor = "v2")
+}
+
+# Select the most variable features to use for integration
+integ_features <- SelectIntegrationFeatures(object.list = split_microglia_subcluster, 
+                                            nfeatures = 3000) 
+
+# Prepare the SCT list object for integration
+split_microglia_subcluster <- PrepSCTIntegration(object.list = split_microglia_subcluster, 
+                                   anchor.features = integ_features)
+
+# Find best buddies - can take a while to run
+integ_anchors <- FindIntegrationAnchors(object.list = split_microglia_subcluster, 
+                                        normalization.method = "SCT", 
+                                        anchor.features = integ_features)
+
+# Integrate across conditions
+int_microglia <- IntegrateData(anchorset = integ_anchors, 
+                                   normalization.method = "SCT")
+
+# Run RunPCA (Don't need to do FindVariableFeatures or ScaleData because we're using SCTransform)
+int_microglia <- RunPCA(int_microglia)
+
+# Elbow plot to identify dimensionality
+ElbowPlot(int_microglia)
+
+# Use the elbow from above to subcluster the cells
+int_microglia <- FindNeighbors(int_microglia, dims = 1:10)
+int_microglia <- FindClusters(int_microglia, resolution = 0.2)
+int_microglia <- RunUMAP(int_microglia, dims = 1:10)
+
+#UMAP Plot of the clusters by condition  
+DimPlot(int_microglia, 
+        reduction = "umap", 
+        pt.size = 1,
+        split.by = "group_id", 
+        label = TRUE) 
+  
+# Assign identity of clusters
+#Set the cell type in the metadata 
+int_microglia$microglia.subcluster <- Idents(int_microglia)
 
 ```
 
-\
+```{r fig.height = 5, fig.width = 12}
+# Compute number of cells per celltype
+n_cells_micro <- FetchData(int_microglia, 
+                     vars = c("microglia.subcluster", "group_id")) %>%
+        dplyr::count(microglia.subcluster, group_id)
+
+# Barplot of number of cells per celltype by sample
+ggplot(n_cells_micro, aes(x=microglia.subcluster, y=n, fill=group_id)) +
+    geom_bar(position=position_dodge(), stat="identity") +
+    geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
+```
+
+```{r}
+# Finding markers in cluster 1, where we see the change we are interested in 
+cluster1.markers <- FindMarkers(int_microglia, ident.1 = 1)
+
+# Finding markers for each cluster compared to the other clusters 
+cluster.markers <- FindAllMarkers(int_microglia, only.pos = TRUE)
+cluster.markers %>%
+    group_by(cluster) %>%
+    filter(cluster == "1")
+
+# Feature Plots loooking at genes that may be altered in aging 
+genelist <- c("Cmtm4")
+
+DotPlot(object = int_microglia, features = genelist, col.min=0) 
+```
 
 \
