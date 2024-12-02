@@ -34,6 +34,10 @@ library(AnnotationDbi) #BiocManager::install("AnnotationDbi")
 library(clusterProfiler) #BiocManager::install("clusterProfiler")
 library(genekitr) #I prefer the graphs this makes over clusterProfiler
 library(scales) # for wrapping long text in graphs 
+library(fgsea) # only using this for mapIdsList
+
+# Heatmap
+library(dittoSeq)
 ```
 
 Why can't I use Seurat 5.0? Seurat needs SeruatObject, which needs Matrix. The newest version of Matrix is only compatible with R 4.4, the compute server runs R 4.3.
@@ -79,7 +83,6 @@ sample_dimplot <- DimPlot(ut23.object,
     repel = FALSE) + 
     scale_color_brewer(palette = "Set3") +
     theme_prism(base_size = 10)  
-
 
 # C:By group --------
 Idents(ut23.object) <- ut23.object$cluster_id
@@ -253,7 +256,7 @@ analyze_cell_type <- function(cell_type) {
 }
 
 # List of cell types to analyze
-cell_types <- c("Microglia", "Astrocytes", "Oligodendrocytes", "Excitatory Neurons", "Inhibitory Neurons", "Oligodendrocyte Precursors")
+cell_types <- c("Microglia", "Astrocytes", "Oligodendrocytes", "Excitatory Neurons", "Inhibitory Neurons", "Oligodendrocyte Precursors", "Endothelial")
 
 # Initialize a list to store results for each cell type
 results_list <- list()
@@ -275,7 +278,7 @@ print(results_list[["Oligodendrocyte Precursors"]]$volcano_plot)
 saveRDS(results_list, file = "/stor/work/Fonken/UT23_snRNAseq/local_ut23/dge_results.rds")
 ```
 
-### Gene Set Enrichment Analysis (GO and KEGG) and Volcano Plots
+### Figure 2: Gene Set Enrichment Analysis (GO and KEGG) and Volcano Plots
 
 ```{r fig.height = 15, fig.width = 12}
 # Read in the list of DEGs
@@ -305,7 +308,6 @@ yvav_genelist = sort(yvav_genelist, decreasing = TRUE)
 gse_yvav <- gseGO(geneList=yvav_genelist, 
              ont ="BP", 
              keyType = "SYMBOL", 
-             nPerm = 10000, 
              minGSSize = 3, 
              maxGSSize = 800, 
              pvalueCutoff = 0.05, 
@@ -325,7 +327,7 @@ gse_yvav_df <- gse_yvav@result %>%
 gse_yvav_graph <- ggplot(gse_yvav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
     geom_col(orientation='y') + 
     theme_prism(base_size = 9) + 
-    scale_fill_manual(values = c("TRUE" = "#004E89", "FALSE" = "#C19A00")) +
+    scale_fill_manual(values = c("TRUE" = "#00B6EB", "FALSE" = "#00B6EB")) +
     scale_y_discrete(labels = label_wrap(40)) + 
     theme(legend.position = "none") + 
     xlab("Normalized Enrichment Score") + 
@@ -341,7 +343,6 @@ amav_genelist = sort(amav_genelist, decreasing = TRUE)
 gse_amav <- gseGO(geneList=amav_genelist, 
              ont ="BP", 
              keyType = "SYMBOL", 
-             nPerm = 10000, 
              minGSSize = 3, 
              maxGSSize = 800, 
              pvalueCutoff = 0.05, 
@@ -361,7 +362,7 @@ gse_amav_df <- gse_amav@result %>%
 gse_amav_graph <- ggplot(gse_amav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
     geom_col(orientation='y') + 
     theme_prism(base_size = 9) + 
-    scale_fill_manual(values = c("TRUE" = "#004E89", "FALSE" = "#C19A00")) +
+    scale_fill_manual(values = c("TRUE" = "#00B6EB", "FALSE" = "#00B6EB")) +
     scale_y_discrete(labels = label_wrap(40)) + 
     theme(legend.position = "none") + 
     xlab("Normalized Enrichment Score") + 
@@ -405,10 +406,25 @@ yvav_kegg_df <- yvav_kegg@result %>%
             slice(1:5)
         )
 
+#11.20.24 experimental stuff to try to get gene names as the entrez id symbols
+yvav_kegg_df$core_enrichment <- gsub("/", ",", yvav_kegg_df$core_enrichment )
+
+yvav_kegg_df$core_enrichment_list <- strsplit(yvav_kegg_df$core_enrichment, ",")
+
+yvav_kegg_df$gene_symbols <- mapIdsList(org.Rn.eg.db,
+                              keys = yvav_kegg_df$core_enrichment_list,
+                              column = "SYMBOL",
+                              keytype = "ENTREZID",
+                              multiVals = "first")
+
+comma_separated_list_test <- paste(sprintf('"%s"', yvav_kegg_df$gene_symbols[[6]]), collapse = ",")
+
+# end----
+
 yvav_kegg_graph <- ggplot(yvav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
     geom_col(orientation='y') + 
     theme_prism(base_size = 9) + 
-    scale_fill_manual(values = c("TRUE" = "#004E89", "FALSE" = "#C19A00")) +
+    scale_fill_manual(values = c("TRUE" = "#00B6EB", "FALSE" = "#00B6EB")) +
     scale_y_discrete(labels = label_wrap(40)) + 
     theme(legend.position = "none") + 
     xlab("Normalized Enrichment Score") + 
@@ -452,10 +468,11 @@ amav_kegg_df <- amav_kegg@result %>%
             slice(1:5)
         )
 
+
 amav_kegg_graph <- ggplot(amav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
     geom_col(orientation='y') + 
     theme_prism(base_size = 9) + 
-    scale_fill_manual(values = c("TRUE" = "#004E89", "FALSE" = "#C19A00")) +
+    scale_fill_manual(values = c("TRUE" = "#00B6EB", "FALSE" = "#00B6EB")) +
     scale_y_discrete(labels = label_wrap(40)) + 
     theme(legend.position = "none") + 
     xlab("Normalized Enrichment Score") + 
@@ -465,12 +482,11 @@ amav_kegg_graph <- ggplot(amav_kegg_df, aes(NES, fct_reorder(Description, NES), 
 # Volcano plots read in
 # YVAV
 keyvals_yvav <- ifelse(
-    dge_results[["Microglia"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_yvav$avg_log2FC < -.5, '#C19A00',
-      ifelse(dge_results[["Microglia"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_yvav$avg_log2FC > .5, '#004E89',
+    dge_results[["Microglia"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_yvav$avg_log2FC < -.5, '#00B6EB',
+      ifelse(dge_results[["Microglia"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_yvav$avg_log2FC > .5, '#00B6EB',
         'gray'))
   keyvals_yvav[is.na(keyvals_yvav)] <- 'gray'
-  names(keyvals_yvav)[keyvals_yvav == '#C19A00'] <- 'downregulated'
-  names(keyvals_yvav)[keyvals_yvav == '#004E89'] <- 'upregulated'
+  names(keyvals_yvav)[keyvals_yvav == '#00B6EB'] <- 'differentially expressed gene (p-adjusted < 0.05)'
 
 volcano_yvav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_yvav,
                                 lab = rownames(dge_results[["Microglia"]]$mast_yvav),
@@ -481,7 +497,8 @@ volcano_yvav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_yvav,
                                 boxedLabels = TRUE,
                                 drawConnectors = TRUE,
                                 FCcutoff = 0.5,
-                                pCutoff = 90,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
                                 colCustom = keyvals_yvav,
                                 xlim = c(-4,4),
                                 ylim = c(0,58),
@@ -495,12 +512,11 @@ volcano_yvav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_yvav,
 
 # AMAV
 keyvals_amav <- ifelse(
-    dge_results[["Microglia"]]$mast_amav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_amav$avg_log2FC < -.5, '#C19A00',
-      ifelse(dge_results[["Microglia"]]$mast_amav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_amav$avg_log2FC > .5, '#004E89',
+    dge_results[["Microglia"]]$mast_amav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_amav$avg_log2FC < -.5, '#00B6EB',
+      ifelse(dge_results[["Microglia"]]$mast_amav$p_val_adj < .05 &        dge_results[["Microglia"]]$mast_amav$avg_log2FC > .5, '#00B6EB',
         'gray'))
   keyvals_amav[is.na(keyvals_amav)] <- 'gray'
-  names(keyvals_amav)[keyvals_amav == '#C19A00'] <- 'downregulated'
-  names(keyvals_amav)[keyvals_amav == '#004E89'] <- 'upregulated'
+  names(keyvals_amav)[keyvals_amav == '#00B6EB'] <- 'differentially expressed gene (p-adjusted < 0.05)'
 
 volcano_amav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_amav,
                                 lab = rownames(dge_results[["Microglia"]]$mast_amav),
@@ -511,7 +527,8 @@ volcano_amav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_amav,
                                 boxedLabels = TRUE,
                                 drawConnectors = TRUE,
                                 FCcutoff = 0.5,
-                                pCutoff = 90,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
                                 colCustom = keyvals_amav,
                                 xlim = c(-4,4),
                                 ylim = c(0,58),
@@ -526,20 +543,134 @@ volcano_amav <- EnhancedVolcano(dge_results[["Microglia"]]$mast_amav,
 # Figure 2 Creation---
 free(volcano_yvav + volcano_amav) / (gse_yvav_graph + gse_amav_graph) / (yvav_kegg_graph + amav_kegg_graph) + plot_layout(height = c(2,2,2)) + plot_annotation(tag_levels = 'A') 
 
-ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/ut23_volcanogsea.png", dpi = 300, width = 12, height = 15)
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/microglia_ut23_volcanogsea.png", dpi = 300, width = 12, height = 15)
 
 ```
 
-### Figure 2
+### Figure 3: Heat map of Inflammatory Genes Among Cell Types
 
-```{r}
-# read the results file 
+Genes associated with aging were taken from this paper:
+
+**Hallmarks of aging-based dual-purpose disease and age-associated targets predicted using PandaOmics AI-powered discovery engine**
+
+<https://www.aging-us.com/article/203960/text#f2>
+
+```{r fig.height = 12, fig.width = 10}
+# read the dge results results file 
 dge_results <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/dge_results.rds")
 
-micro_volcano <- dge_results[["Microglia"]]$volcano_plot
+# Gene list
+aging_genes <- c("Tlr4",
+           "Mmp9",
+           "Tlr2",
+           "Casp1",
+           "Casp3",
+           "Vegfa",
+           "Egfr",
+           "Akt1",
+           "Mapk8",
+           "Il1b",
+           "Tnf",
+           "Itgb2",
+           "Il6",
+           "Cat",
+           "Ppara",
+           "Jak2",
+           "Jak1",
+           "Cxcr4",
+           "Mmp2",
+           "Kit",
+           "Mtor",
+           "Esr1",
+           "Tgfb1",
+           "Spp1",
+           "Hspa5",
+           "Sirt1",
+           "Ar",
+           "Casp8",
+           "Itgam",
+           "Hdac1",
+           "Fgf2",
+           "Mapk1",
+           "Gsk3b",
+           "Ep300",
+           "Hdac9",
+           "Mapk14",
+           "Kdr",
+           "Igf1",
+           "Insr",
+           "Ngf",
+           "Pten",
+           "Vdr",
+           "Ikbkb",
+           "Chuk",
+           "Traf6",
+           "Parp1",
+           "Dnmt1",
+           "Src",
+           "Rhoa",
+           "Ptk2",
+           "Itgav",
+           "Cxcl12",
+           "Hgf",
+           "Lox",
+           "Adam17",
+           "Sod2",
+           "Igf1r",
+           "Igf2",
+           "Egln1",
+           "Tgfbr2",
+           "Rock1",
+           "Notch1",
+           "Ezh2",
+           "Abl1",
+           "Hdac6")
 
-micro_volcano / 
+#aggregating expression for heatmap
+aggr.ut23 <- AggregateExpression(ut23.object, 
+                    assays = "RNA",
+                    return.seurat = TRUE,
+                    group.by = c("sample_id", "cluster_id"),
+                    normalization.method = "LogNormalize")
 
+ "#FFB6C1", "#FFD700", "#6495ED"
+
+#dittoseq heatmap (uses pheatmap)
+dittoHeatmap(aggr.ut23, 
+             aging_genes, 
+             annot.by = c("cluster_id", "sample_id"),
+             heatmap.colors = colorRampPalette(c("#1f77b4", "white", "#ff7f0e"))(50),
+             annot.colors = c("#A58AFF", "#FB61D7", "#C49A00", "#53B400", "#00B6EB", "#00C094", "#F8766D","#FFC0CB", "#FFB6C1", "#FFADD8","#FFDF00", "#FFD700", "#FFC700", "#6BA3FF", "#6495ED", "#5479C9"))
+             
+```
+
+Antigen presentation genes
+
+```{r}
+{r fig.height = 12, fig.width = 10}
+# read the dge results results file 
+
+# Gene list
+antigen_genes <- c("Calm2", "Calm1.1", "Chgb", "Atp1b1", "Olfm1", "Ndufa4", "Dpp10", "Ptprd", "Atp6v0c", "Ubb", "Nkain2", "Stmn3", "Slc25a4", "Hsp90ab1", "Rnasek", "Csmd1", "Hsp90aa1", "Caln1", 
+"Dlg2", "Cox7b", "Plp1", "Nlgn1", "Tenm2", "Mdga2", "Cox7c", "Scg5", "Cox4i1", "Atp5if1", 
+"Calm1", "Fam155a", "Mt-co2", "Dynll1", "Atp5mg", "Caly", "Ptprg", "Actb", "Etl4")
+
+
+#aggregating expression for heatmap
+aggr.ut23 <- AggregateExpression(ut23.object, 
+                    assays = "RNA",
+                    return.seurat = TRUE,
+                    group.by = c("sample_id", "cluster_id"),
+                    normalization.method = "LogNormalize")
+
+ "#FFB6C1", "#FFD700", "#6495ED"
+
+#dittoseq heatmap (uses pheatmap)
+dittoHeatmap(aggr.ut23, 
+             antigen_genes, 
+             annot.by = c("cluster_id", "sample_id"),
+             heatmap.colors = colorRampPalette(c("#1f77b4", "white", "#ff7f0e"))(50),
+             annot.colors = c("#A58AFF", "#FB61D7", "#C49A00", "#53B400", "#00B6EB", "#00C094", "#F8766D","#FFC0CB", "#FFB6C1", "#FFADD8","#FFDF00", "#FFD700", "#FFC700", "#6BA3FF", "#6495ED", "#5479C9"))
 ```
 
 ### Clustering the Microglia Cluster
@@ -645,24 +776,7 @@ ggplot(n_cells_micro, aes(x=microglia.subcluster, y=n, fill=group_id)) +
     geom_text(aes(label=n), vjust = -.2, position=position_dodge(1))
 ```
 
-Ttr contamination study
-
-```{r}
-
-choroid_genes <- c("Ttr", "Folr1", "Prlr", "Aqp1", "Zo1", "Icam1")
-
-# Calculate average expression per sample for the choroid plexus genes
-AverageExpression(ut23.object, features = choroid_genes, group.by = "sample_id")
-
-VlnPlot(ut23.object, features = choroid_genes, group.by = "sample_id", pt.size = 0.1, combine = TRUE)
-n_groups <- length(unique(ut23.object$sample_id))
-colors <- colorRampPalette(RColorBrewer::brewer.pal(8, "Set1"))(n_groups)
-
-# Create DotPlot with enough colors
-
-DotPlot(ut23.object, "Ttr", assay="RNA")
-
-
+```         
 ```
 
 ```{r}
@@ -686,4 +800,512 @@ FeaturePlot(ut23.object,
             split.by = "sample_id",
             pt.size = 2,
             label = TRUE)
+```
+
+### DEGs and GSEA for Astrocytes
+
+```{r fig.height = 15, fig.width = 12}
+# Read in the list of DEGs
+dge_results <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/dge_results.rds")
+
+# Astrocyte data frames, filtering for significang genes, then adding ENTREZID 
+astro_yvav <- as.data.frame(dge_results$Astrocytes$mast_yvav) 
+
+#lists of DEGs to look up
+astro_yvav_filt <- astro_yvav %>%
+  filter(p_val_adj < 0.05 &
+         (avg_log2FC > 0.5 | avg_log2FC < -0.5)) %>%
+  rownames()
+
+astro_amav <- as.data.frame(dge_results$Astrocytes$mast_amav) 
+
+#lists of DEGs to look up
+astro_amav_filt <- astro_amav %>%
+  filter(p_val_adj < 0.05 &
+         (avg_log2FC > 0.5 | avg_log2FC < -0.5)) %>%
+  rownames()
+
+# YVAV --------
+# Creating the Ranked Gene List for GSEA GO Analysis 
+yvav_genelist <- astro_yvav$avg_log2FC
+names(yvav_genelist) <- rownames(astro_yvav)
+yvav_genelist = sort(yvav_genelist, decreasing = TRUE)
+
+gse_yvav <- gseGO(geneList=yvav_genelist, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Rn.eg.db, 
+             pAdjustMethod = "none") 
+
+gse_yvav_df <- gse_yvav@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            gse_yvav@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+gse_yvav_graph <- ggplot(gse_yvav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#A58AFF", "FALSE" = "#A58AFF")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("GO: Biological Processes") + 
+    ylab(NULL)
+
+#AMAV
+# Creating the Ranked Gene List for GSEA GO Analysis 
+amav_genelist <- astro_amav$avg_log2FC
+names(amav_genelist) <- rownames(astro_amav)
+amav_genelist = sort(amav_genelist, decreasing = TRUE)
+
+gse_amav <- gseGO(geneList=amav_genelist, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Rn.eg.db, 
+             pAdjustMethod = "none")
+
+gse_amav_df <- gse_amav@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            gse_amav@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+gse_amav_graph <- ggplot(gse_amav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#A58AFF", "FALSE" = "#A58AFF")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("GO: Biological Processes") + 
+    ylab(NULL)
+
+# YVAV
+# Creating the ranked gene list for GSEA KEGG Analysis (This one needs EntrezIDs)
+astro_yvav_kegg <- astro_yvav %>%
+  rownames_to_column(var = "gene")
+
+astro_yvav_kegg$entrez_id <- mapIds(org.Rn.eg.db, 
+                               keys = astro_yvav_kegg$gene, 
+                               column = "ENTREZID", 
+                               keytype = "SYMBOL", 
+                               multiVals = "first")
+
+# Excluding NA values 
+astro_yvav_kegg <- na.omit(astro_yvav_kegg)
+
+# Creating list 
+kegglist <- astro_yvav_kegg$avg_log2FC
+names(kegglist) <- astro_yvav_kegg$entrez_id
+kegglist = sort(kegglist, decreasing = TRUE)
+kegg_organism = "rno" # need to define organism with 3 letter code
+
+yvav_kegg <- gseKEGG(geneList = kegglist,
+               organism     = kegg_organism,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+yvav_kegg_df <- yvav_kegg@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            yvav_kegg@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+yvav_kegg_graph <- ggplot(yvav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#A58AFF", "FALSE" = "#A58AFF")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("KEGG Pathways") + 
+    ylab(NULL)
+
+# AMAV
+# Creating the ranked gene list for GSEA KEGG Analysis (This one needs EntrezIDs)
+astro_amav_kegg <- astro_amav %>%
+  rownames_to_column(var = "gene")
+
+astro_amav_kegg$entrez_id <- mapIds(org.Rn.eg.db, 
+                               keys = astro_amav_kegg$gene, 
+                               column = "ENTREZID", 
+                               keytype = "SYMBOL", 
+                               multiVals = "first")
+
+# Excluding NA values 
+astro_amav_kegg <- na.omit(astro_amav_kegg)
+
+# Creating list 
+kegglist <- astro_amav_kegg$avg_log2FC
+names(kegglist) <- astro_amav_kegg$entrez_id
+kegglist = sort(kegglist, decreasing = TRUE)
+kegg_organism = "rno" # need to define organism with 3 letter code
+
+amav_kegg <- gseKEGG(geneList = kegglist,
+               organism     = kegg_organism,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+amav_kegg_df <- amav_kegg@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            amav_kegg@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+amav_kegg_graph <- ggplot(amav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#A58AFF", "FALSE" = "#A58AFF")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("KEGG Pathways") + 
+    ylab(NULL)
+
+# Volcano plots read in
+# YVAV
+keyvals_yvav <- ifelse(
+    dge_results[["Astrocytes"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Astrocytes"]]$mast_yvav$avg_log2FC < -.5, '#A58AFF',
+      ifelse(dge_results[["Astrocytes"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Astrocytes"]]$mast_yvav$avg_log2FC > .5, '#A58AFF',
+        'gray'))
+  keyvals_yvav[is.na(keyvals_yvav)] <- 'gray'
+  names(keyvals_yvav)[keyvals_yvav == '#A58AFF'] <- 'differentially expressed gene (p-adjusted < 0.05)'
+
+
+volcano_yvav <- EnhancedVolcano(dge_results[["Astrocytes"]]$mast_yvav,
+                                lab = rownames(dge_results[["Astrocytes"]]$mast_yvav),
+                                selectLab = union(rownames(dge_results[["Astrocytes"]]$mast_yvav)[which(names(keyvals_yvav) %in% c('high', 'low'))],
+                                                  c('Calm2','Hsp90aa1','Hsp90ab1','Bsg','Itih3','Sub1','Actb')),
+                                x = "avg_log2FC",
+                                y = "p_val",
+                                boxedLabels = TRUE,
+                                drawConnectors = TRUE,
+                                FCcutoff = 0.5,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
+                                colCustom = keyvals_yvav,
+                                xlim = c(-4,4),
+                                ylim = c(0,30),
+                                subtitle = NULL,
+                                gridlines.major = FALSE,
+                                gridlines.minor = FALSE,
+                                ) + 
+  ggtitle("Young Vehicle vs Aged Vehicle \nDifferential Expression") + 
+  theme_prism(base_size = 10) + 
+  theme(legend.position = "none")
+
+# AMAV
+keyvals_amav <- ifelse(
+    dge_results[["Astrocytes"]]$mast_amav$p_val_adj < .05 &        dge_results[["Astrocytes"]]$mast_amav$avg_log2FC < -.5, '#A58AFF',
+      ifelse(dge_results[["Astrocytes"]]$mast_amav$p_val_adj < .05 &        dge_results[["Astrocytes"]]$mast_amav$avg_log2FC > .5, '#A58AFF',
+        'gray'))
+  keyvals_amav[is.na(keyvals_amav)] <- 'gray'
+  names(keyvals_amav)[keyvals_amav == '#A58AFF'] <- 'differentially expressed gene (p-adjusted < 0.05)'
+
+
+volcano_amav <- EnhancedVolcano(dge_results[["Astrocytes"]]$mast_amav,
+                                lab = rownames(dge_results[["Astrocytes"]]$mast_amav),
+                                selectLab = union(rownames(dge_results[["Astrocytes"]]$mast_amav)[which(names(keyvals_amav) %in% c('high', 'low'))],
+                                                  c('Hsp90aa1','Itih3','Actb','Fstl5','Colec12','Hsp90ab1','Tpt1')),
+                                x = "avg_log2FC",
+                                y = "p_val",
+                                boxedLabels = TRUE,
+                                drawConnectors = TRUE,
+                                FCcutoff = 0.5,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
+                                colCustom = keyvals_amav,
+                                xlim = c(-4,4),
+                                ylim = c(0,30),
+                                subtitle = NULL,
+                                gridlines.major = FALSE,
+                                gridlines.minor = FALSE,
+                                ) + 
+  ggtitle("Aged M Vaccae vs Aged Vehicle \nDifferential Expression") + 
+  theme_prism(base_size = 10) + 
+  theme(legend.position = "bottom")
+
+# Figure 2 Creation---
+free(volcano_yvav + volcano_amav) / (gse_yvav_graph + gse_amav_graph) / (yvav_kegg_graph + amav_kegg_graph) + plot_layout(height = c(2,2,2)) + plot_annotation(tag_levels = 'A') 
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/astro_ut23_volcanogsea.png", dpi = 300, width = 12, height = 15)
+```
+
+### DEGs and GSEA for Endothelial Cells
+
+```{r fig.height = 15, fig.width = 12}
+# Read in the list of DEGs
+dge_results <- readRDS("/stor/work/Fonken/UT23_snRNAseq/local_ut23/dge_results.rds")
+
+# Endothelial data frames, filtering for significang genes, then adding ENTREZID 
+endo_yvav <- as.data.frame(dge_results$Endothelial$mast_yvav) 
+
+#lists of DEGs to look up
+endo_yvav_filt <- endo_yvav %>%
+  filter(p_val_adj < 0.05 &
+         (avg_log2FC > 0.5 | avg_log2FC < -0.5)) %>%
+  rownames()
+
+endo_amav <- as.data.frame(dge_results$Endothelial$mast_amav) 
+
+#lists of DEGs to look up
+endo_amav_filt <- endo_amav %>%
+  filter(p_val_adj < 0.05 &
+         (avg_log2FC > 0.5 | avg_log2FC < -0.5)) %>%
+  rownames()
+
+# YVAV --------
+# Creating the Ranked Gene List for GSEA GO Analysis 
+yvav_genelist <- endo_yvav$avg_log2FC
+names(yvav_genelist) <- rownames(endo_yvav)
+yvav_genelist = sort(yvav_genelist, decreasing = TRUE)
+
+gse_yvav <- gseGO(geneList=yvav_genelist, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Rn.eg.db, 
+             pAdjustMethod = "none") 
+
+gse_yvav_df <- gse_yvav@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            gse_yvav@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+gse_yvav_graph <- ggplot(gse_yvav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#FB61D7", "FALSE" = "#FB61D7")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("GO: Biological Processes") + 
+    ylab(NULL)
+
+#AMAV
+# Creating the Ranked Gene List for GSEA GO Analysis 
+amav_genelist <- endo_amav$avg_log2FC
+names(amav_genelist) <- rownames(endo_amav)
+amav_genelist = sort(amav_genelist, decreasing = TRUE)
+
+gse_amav <- gseGO(geneList=amav_genelist, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Rn.eg.db, 
+             pAdjustMethod = "none")
+
+gse_amav_df <- gse_amav@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            gse_amav@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+gse_amav_graph <- ggplot(gse_amav_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#FB61D7", "FALSE" = "#FB61D7")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("GO: Biological Processes") + 
+    ylab(NULL)
+
+# YVAV
+# Creating the ranked gene list for GSEA KEGG Analysis (This one needs EntrezIDs)
+endo_yvav_kegg <- endo_yvav %>%
+  rownames_to_column(var = "gene")
+
+endo_yvav_kegg$entrez_id <- mapIds(org.Rn.eg.db, 
+                               keys = endo_yvav_kegg$gene, 
+                               column = "ENTREZID", 
+                               keytype = "SYMBOL", 
+                               multiVals = "first")
+
+# Excluding NA values 
+endo_yvav_kegg <- na.omit(endo_yvav_kegg)
+
+# Creating list 
+kegglist <- endo_yvav_kegg$avg_log2FC
+names(kegglist) <- endo_yvav_kegg$entrez_id
+kegglist = sort(kegglist, decreasing = TRUE)
+kegg_organism = "rno" # need to define organism with 3 letter code
+
+yvav_kegg <- gseKEGG(geneList = kegglist,
+               organism     = kegg_organism,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+yvav_kegg_df <- yvav_kegg@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            yvav_kegg@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+yvav_kegg_graph <- ggplot(yvav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#FB61D7", "FALSE" = "#FB61D7")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("KEGG Pathways") + 
+    ylab(NULL)
+
+# AMAV
+# Creating the ranked gene list for GSEA KEGG Analysis (This one needs EntrezIDs)
+endo_amav_kegg <- endo_amav %>%
+  rownames_to_column(var = "gene")
+
+endo_amav_kegg$entrez_id <- mapIds(org.Rn.eg.db, 
+                               keys = endo_amav_kegg$gene, 
+                               column = "ENTREZID", 
+                               keytype = "SYMBOL", 
+                               multiVals = "first")
+
+# Excluding NA values 
+endo_amav_kegg <- na.omit(endo_amav_kegg)
+
+# Creating list 
+kegglist <- endo_amav_kegg$avg_log2FC
+names(kegglist) <- endo_amav_kegg$entrez_id
+kegglist = sort(kegglist, decreasing = TRUE)
+kegg_organism = "rno" # need to define organism with 3 letter code
+
+amav_kegg <- gseKEGG(geneList = kegglist,
+               organism     = kegg_organism,
+               minGSSize    = 3,
+               maxGSSize    = 800,
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "none",
+               keyType       = "ncbi-geneid")
+
+amav_kegg_df <- amav_kegg@result %>%
+        arrange(desc(NES)) %>%
+        slice(1:5) %>%
+        bind_rows(
+            amav_kegg@result %>%
+            arrange(NES) %>%
+            slice(1:5)
+        )
+
+amav_kegg_graph <- ggplot(amav_kegg_df, aes(NES, fct_reorder(Description, NES), fill = NES > 0)) + 
+    geom_col(orientation='y') + 
+    theme_prism(base_size = 9) + 
+    scale_fill_manual(values = c("TRUE" = "#FB61D7", "FALSE" = "#FB61D7")) +
+    scale_y_discrete(labels = label_wrap(40)) + 
+    theme(legend.position = "none") + 
+    xlab("Normalized Enrichment Score") + 
+    ggtitle("KEGG Pathways") + 
+    ylab(NULL)
+
+# Volcano plots read in
+# YVAV
+keyvals_yvav <- ifelse(
+    dge_results[["Endothelial"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Endothelial"]]$mast_yvav$avg_log2FC < -.5, '#FB61D7',
+      ifelse(dge_results[["Endothelial"]]$mast_yvav$p_val_adj < .05 &        dge_results[["Endothelial"]]$mast_yvav$avg_log2FC > .5, '#FB61D7',
+        'gray'))
+  keyvals_yvav[is.na(keyvals_yvav)] <- 'gray'
+  names(keyvals_yvav)[keyvals_yvav == '#FB61D7'] <- 'differentially expressed gene (p-adjusted < 0.05)'
+
+
+volcano_yvav <- EnhancedVolcano(dge_results[["Endothelial"]]$mast_yvav,
+                                lab = rownames(dge_results[["Endothelial"]]$mast_yvav),
+                                x = "avg_log2FC",
+                                y = "p_val",
+                                boxedLabels = TRUE,
+                                drawConnectors = TRUE,
+                                FCcutoff = 0.5,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
+                                colCustom = keyvals_yvav,
+                                xlim = c(-4,4),
+                                ylim = c(0,5),
+                                subtitle = NULL,
+                                gridlines.major = FALSE,
+                                gridlines.minor = FALSE,
+                                ) + 
+  ggtitle("Young Vehicle vs Aged Vehicle \nDifferential Expression") + 
+  theme_prism(base_size = 10) + 
+  theme(legend.position = "none")
+
+# AMAV
+keyvals_amav <- ifelse(
+    dge_results[["Endothelial"]]$mast_amav$p_val_adj < .05 &        dge_results[["Endothelial"]]$mast_amav$avg_log2FC < -.5, '#FB61D7',
+      ifelse(dge_results[["Endothelial"]]$mast_amav$p_val_adj < .05 &        dge_results[["Endothelial"]]$mast_amav$avg_log2FC > .5, '#FB61D7',
+        'gray'))
+  keyvals_amav[is.na(keyvals_amav)] <- 'gray'
+  names(keyvals_amav)[keyvals_amav == '#FB61D7'] <- 'differentially expressed gene (p-adjusted < 0.05)'
+
+
+volcano_amav <- EnhancedVolcano(dge_results[["Endothelial"]]$mast_amav,
+                                lab = rownames(dge_results[["Endothelial"]]$mast_amav),
+                                x = "avg_log2FC",
+                                y = "p_val",
+                                boxedLabels = TRUE,
+                                drawConnectors = TRUE,
+                                FCcutoff = 0.5,
+                                pCutoff = 0.05,
+                                pCutoffCol = "p_val_adj",
+                                colCustom = keyvals_amav,
+                                xlim = c(-4,4),
+                                ylim = c(0,5),
+                                subtitle = NULL,
+                                gridlines.major = FALSE,
+                                gridlines.minor = FALSE,
+                                ) + 
+  ggtitle("Aged M Vaccae vs Aged Vehicle \nDifferential Expression") + 
+  theme_prism(base_size = 10) + 
+  theme(legend.position = "bottom")
+
+# Figure 2 Creation---
+free(volcano_yvav + volcano_amav) / (gse_yvav_graph + gse_amav_graph) / (yvav_kegg_graph + amav_kegg_graph) + plot_layout(height = c(2,2,2)) + plot_annotation(tag_levels = 'A') 
+
+ggsave("/stor/work/Fonken/UT23_snRNAseq/local_ut23/Graphs/endo_ut23_volcanogsea.png", dpi = 300, width = 12, height = 15)
 ```
